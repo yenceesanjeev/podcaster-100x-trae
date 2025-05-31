@@ -82,17 +82,25 @@ export function RecordingsList() {
 
       if (!audioUrl) {
         // Get audio data from ElevenLabs API
+        console.log('Fetching audio for conversation:', recording.conversation_id);
+        console.log('API Key available:', !!process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY);
+        
         const response = await fetch(
           `https://api.elevenlabs.io/v1/convai/conversations/${recording.conversation_id}/audio`,
           {
             headers: {
-              "xi-api-key": process.env.NEXT_PUBLIC_ELEVEN_LABS_API_KEY!,
+              "xi-api-key": process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY || '',
+              "Content-Type": "application/json",
             },
           }
         );
 
+        console.log('ElevenLabs API response status:', response.status);
+        
         if (!response.ok) {
-          throw new Error("Failed to fetch audio");
+          const errorText = await response.text();
+          console.error('ElevenLabs API error:', errorText);
+          throw new Error(`Failed to fetch audio: ${response.status} ${errorText}`);
         }
 
         const audioBlob = await response.blob();
@@ -139,17 +147,25 @@ export function RecordingsList() {
       let audioUrl = audioUrls[recording.id];
 
       if (!audioUrl) {
+        console.log('Fetching audio for download, conversation:', recording.conversation_id);
+        console.log('API Key available:', !!process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY);
+        
         const response = await fetch(
           `https://api.elevenlabs.io/v1/convai/conversations/${recording.conversation_id}/audio`,
           {
             headers: {
-              "xi-api-key": process.env.NEXT_PUBLIC_ELEVEN_LABS_API_KEY!,
+              "xi-api-key": process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY || '',
+              "Content-Type": "application/json",
             },
           }
         );
 
+        console.log('ElevenLabs API response status:', response.status);
+        
         if (!response.ok) {
-          throw new Error("Failed to fetch audio");
+          const errorText = await response.text();
+          console.error('ElevenLabs API error:', errorText);
+          throw new Error(`Failed to fetch audio: ${response.status} ${errorText}`);
         }
 
         const audioBlob = await response.blob();

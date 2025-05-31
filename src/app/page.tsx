@@ -24,7 +24,7 @@ export default function Page() {
   const startTimeRef = useRef<number | null>(null);
   const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
 
-  const apiKey = process.env.NEXT_PUBLIC_ELEVEN_LABS_API_KEY || '';
+  const apiKey = process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY || '';
   console.log('API Key length:', apiKey.length); // Just log the length for security
 
   const conversation = useConversation({
