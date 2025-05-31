@@ -1,8 +1,11 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { useConversation } from '@elevenlabs/react'; // Removed ConnectionStatus
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { useConversation } from '@elevenlabs/react';
 import { RecordingsList } from './components/RecordingsList';
+import { LinkedInProfileInput } from './components/LinkedInProfileInput';
+import { PodcastBrief } from './components/PodcastBrief';
+import { fetchLinkedInProfile, generatePodcastBrief } from './services/linkedinService';
 
 interface UserCredits {
   totalMinutesUsed: number;
@@ -15,11 +18,26 @@ interface Recording {
   duration: number;
   created_at: string;
   conversation_id: string;
+  guest_name?: string;
+  guest_profile_url?: string;
+}
+
+interface PodcastGuest {
+  guestName: string;
+  guestTitle: string;
+  guestProfileUrl: string;
+  guestProfilePicture: string;
+  introduction: string;
+  questions: string[];
 }
 
 export default function Page() {
   const [credits, setCredits] = useState<UserCredits | null>(null);
   const [isLoadingCredits, setIsLoadingCredits] = useState(true);
+  const [isProcessingProfile, setIsProcessingProfile] = useState(false);
+  const [currentStep, setCurrentStep] = useState<'input' | 'brief' | 'recording'>('input');
+  const [podcastGuest, setPodcastGuest] = useState<PodcastGuest | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   const startTimeRef = useRef<number | null>(null);
   const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
@@ -90,13 +108,15 @@ export default function Page() {
     try {
       console.log('Saving recording with ID:', conversationId);
       
-      // Create a new recording object
+      // Create a new recording object with guest info if available
       const newRecording: Recording = {
         id: crypto.randomUUID(), // Generate a random UUID
-        title: `Conversation ${new Date().toLocaleString()}`,
+        title: podcastGuest ? `Podcast with ${podcastGuest.guestName}` : `Conversation ${new Date().toLocaleString()}`,
         conversation_id: conversationId,
         duration: 0,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        guest_name: podcastGuest?.guestName,
+        guest_profile_url: podcastGuest?.guestProfileUrl
       };
       
       // Get existing recordings and add the new one
@@ -138,17 +158,44 @@ export default function Page() {
     }
   };
 
+  const handleProfileSubmit = async (profileUrl: string) => {
+    try {
+      setIsProcessingProfile(true);
+      setProfileError(null);
+      
+      // Fetch LinkedIn profile data
+      console.log('Fetching LinkedIn profile:', profileUrl);
+      const profileData = await fetchLinkedInProfile(profileUrl);
+      console.log('LinkedIn profile data:', profileData);
+      
+      // Generate podcast brief using OpenAI
+      console.log('Generating podcast brief...');
+      const brief = await generatePodcastBrief(profileData, profileUrl);
+      console.log('Generated podcast brief:', brief);
+      
+      // Set podcast guest data
+      setPodcastGuest(brief);
+      
+      // Move to brief display step (user must click Start Podcast to proceed)
+      setCurrentStep('brief');
+    } catch (error) {
+      console.error('Error processing LinkedIn profile:', error);
+      setProfileError(error instanceof Error ? error.message : 'An unknown error occurred');
+    } finally {
+      setIsProcessingProfile(false);
+    }
+  };
+
   const handleStartRecording = async () => {
+    console.log('handleStartRecording called');
+    console.log('Agent ID:', agentId);
+    console.log('API Key (last 4):', apiKey ? apiKey.slice(-4) : 'none');
     try {
       if (!agentId) {
         alert('ElevenLabs Agent ID is not configured.');
         return;
       }
       
-      // No sign-in check required
-      
-      // Credits check removed - no user-based credits
-
       // Request microphone permission
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       console.log('Microphone permission granted');
@@ -156,15 +203,37 @@ export default function Page() {
       startCredits();
       console.log('Credits tracking started');
 
+      // Prepare dynamic variables for the AI host
+      if (!podcastGuest?.introduction) {
+        throw new Error('Guest introduction is required');
+      }
+
+      const dynamicVariables: Record<string, string | number | boolean> = {
+        guest_intro: podcastGuest.introduction,
+        guest_profile_url: podcastGuest.guestProfileUrl || '',
+        guest_profile_picture: podcastGuest.guestProfilePicture || '',
+        podcast_questions: podcastGuest.questions?.map((q: string, idx: number) => `${idx + 1}. ${q}`).join('\n') || ''
+      };
+
+      // Debug: log the variables being sent to ElevenLabs
+      console.log('Dynamic variables being sent to ElevenLabs:', dynamicVariables);
+
+      // Debug: log the variables being sent to ElevenLabs
+      console.log('Dynamic variables being sent to ElevenLabs:', dynamicVariables);
+
       // Start the conversation with your agent
       console.log('Initializing session with agent...');
       const id = await conversation.startSession({
         agentId: agentId,
+        dynamicVariables: dynamicVariables
       });
       console.log('Session started successfully with ID:', id);
       
       conversationIdRef.current = id;
       await saveRecording(id);
+      
+      // Move to recording step
+      setCurrentStep('recording');
 
     } catch (error) {
       console.error('Failed to start conversation:', error);
@@ -182,6 +251,9 @@ export default function Page() {
       await conversation.endSession();
       await stopCredits();
       console.log('Recording stopped');
+      // Reset to input step
+      setCurrentStep('input');
+      setPodcastGuest(null);
     } catch (error) {
       console.error('Error stopping session:', error);
       alert('Failed to stop recording. Check console for details.');
@@ -193,65 +265,82 @@ export default function Page() {
     alert('This functionality is not yet implemented.');
   };
 
-
+  const renderCurrentStep = () => {
+    switch (currentStep) {
+      case 'input':
+        return (
+          <LinkedInProfileInput 
+            onProfileSubmit={handleProfileSubmit} 
+            isLoading={isProcessingProfile} 
+          />
+        );
+      case 'brief':
+        return podcastGuest ? (
+          <PodcastBrief 
+            {...podcastGuest}
+            onStartRecording={handleStartRecording}
+            isLoading={false}
+          />
+        ) : null;
+      case 'recording':
+        return (
+          <div className="text-center">
+            <p className="mb-4 text-lg">Recording in progress with {podcastGuest?.guestName || 'Guest'}...</p>
+            <button
+              onClick={handleStopRecording}
+              className="bg-red-600 text-white py-3 px-6 rounded-full hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+            >
+              Stop Recording
+            </button>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center justify-center p-4 text-black">
       <header className="text-center mb-12">
         <h1 className="text-5xl font-bold mb-2">Record a podcast with an AI Host</h1>
-        <p className="text-lg text-gray-600">Because everybody has a story to share</p>
+        <p className="text-xl text-gray-600">
+          {currentStep === 'input' ? 
+            'Enter a LinkedIn profile to create a personalized podcast experience' : 
+            podcastGuest ? `Podcast with ${podcastGuest.guestName}` : 'AI-Powered Podcast'}
+        </p>
       </header>
 
-      <div className="w-full max-w-2xl bg-gray-50 p-8 rounded-xl shadow-lg">
-        <div className="flex justify-around mb-6">
-          <button
-            onClick={handleStartRecording}
-            disabled={conversation.status === 'connected'}
-            className="px-6 py-3 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 disabled:bg-gray-400 flex items-center space-x-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-            </svg>
-            <span>Start Recording</span>
-          </button>
-          <button
-            onClick={handleStopRecording}
-            disabled={conversation.status !== 'connected'}
-            className="px-6 py-3 bg-white text-gray-700 border border-gray-300 rounded-lg font-semibold hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400 flex items-center space-x-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
-            </svg>
-            <span>Stop Recording</span>
-          </button>
-          <button
-            onClick={handleBuyMinutes}
-            className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300"
-          >
-            Buy 20 Minutes (₹299)
-          </button>
+      {profileError && (
+        <div className="mb-6 p-4 bg-red-100 text-red-700 rounded-md max-w-md mx-auto">
+          <p><strong>Error:</strong> {profileError}</p>
         </div>
+      )}
 
-        <div className="bg-white p-4 rounded-lg shadow mb-8 text-center">
-          <div className="flex items-center justify-center gap-2">
-            <p className="text-gray-700">
-              <span className={`inline-block w-3 h-3 rounded-full mr-2 ${conversation.status === 'connected' ? 'bg-green-500' : conversation.status === 'connecting' ? 'bg-yellow-500' : 'bg-red-500'}`}></span>
-              Status: {conversation.status} {conversation.isSpeaking && "(Agent is speaking)"}
-            </p>
-          </div>
-          {credits !== null && (
-            <div className="text-sm mt-2">
-              <p>Minutes remaining: <span className="font-medium">{(credits.availableMinutes - credits.totalMinutesUsed).toFixed(2)}</span></p>
-            </div>
+      <main className="w-full max-w-4xl mx-auto mb-12">
+        {renderCurrentStep()}
+      </main>
+
+      {/* Credits display */}
+      {credits && (
+        <div className="mb-8 text-center">
+          <p className="text-gray-600">
+            {credits.availableMinutes} minutes available
+          </p>
+          {credits.availableMinutes < 5 && (
+            <button
+              onClick={handleBuyMinutes}
+              className="mt-2 text-blue-600 hover:underline"
+            >
+              Buy more minutes
+            </button>
           )}
         </div>
+      )}
 
+      {/* Recordings list */}
+      <div className="w-full max-w-4xl mx-auto">
         <RecordingsList />
       </div>
-
-      <footer className="mt-12 text-center text-sm text-gray-500">
-        <p>P.S - I don&apos;t have a credit card on Eleven Labs, so I don&apos;t know when it&apos;ll stop working</p>
-      </footer>
     </div>
   );
 }
