@@ -1,6 +1,23 @@
-import Image from "next/image";
+'use client'
+
+import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import Image from 'next/image'
 
 export default function Home() {
+  const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const supabase = createClient()
+
+  useEffect(() => {
+    async function getUser() {
+      const { data: { user } } = await supabase.auth.getUser()
+      setUser(user)
+      setLoading(false)
+    }
+    getUser()
+  }, [supabase.auth])
+
   return (
     <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
       <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
@@ -12,6 +29,22 @@ export default function Home() {
           height={38}
           priority
         />
+        
+        {loading ? (
+          <p>Loading user data...</p>
+        ) : user ? (
+          <div>
+            <p>Welcome, {user.email}!</p>
+            <button onClick={async () => await supabase.auth.signOut()}>Sign Out</button>
+          </div>
+        ) : (
+          <div>
+            <p>You are not logged in.</p>
+            <button onClick={async () => await supabase.auth.signInWithOAuth({ provider: 'github' })}>Sign In with GitHub</button>
+            {/* Add more OAuth providers or email/password sign-in as needed */}
+          </div>
+        )}
+
         <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
           <li className="mb-2 tracking-[-.01em]">
             Get started by editing{" "}
