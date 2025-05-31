@@ -1,39 +1,212 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useConversation } from '@elevenlabs/react'; // Removed ConnectionStatus
+import { createClient } from '@/lib/supabase/client';
+import { RecordingsList } from './components/RecordingsList';
+
+interface UserCredits {
+  totalMinutesUsed: number;
+  availableMinutes: number;
+}
 
 export default function Page() {
-  const [recordings, setRecordings] = useState<string[]>([]);
+  const [credits, setCredits] = useState<UserCredits | null>(null);
+  const [isLoadingCredits, setIsLoadingCredits] = useState(true);
+  const conversationIdRef = useRef<string | null>(null);
+  const startTimeRef = useRef<number | null>(null);
   const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
+  const supabase = createClient();
 
-  const {
-    startSession,
-    endSession, // Renamed from stopSession
-    isSpeaking, // Renamed from isRecording
-    status, // Renamed from connectionStatus
-    // ... other properties you might be using from the hook
-  } = useConversation({
-    agentId: agentId,
-    // You might need to add other options here if required by your setup or the hook
+  const apiKey = process.env.NEXT_PUBLIC_ELEVEN_LABS_API_KEY || '';
+  console.log('API Key length:', apiKey.length); // Just log the length for security
+
+  const conversation = useConversation({
+    onConnect: () => {
+      console.log('Connected to Eleven Labs WebSocket');
+      startTimeRef.current = Date.now();
+    },
+    onDisconnect: async () => {
+      console.log('Disconnected from Eleven Labs WebSocket');
+      stopCredits();
+      if (conversationIdRef.current) {
+        await updateRecordingDuration();
+      }
+    },
+    onMessage: (message) => {
+      console.log('Message received:', message);
+    },
+    onError: (error: unknown) => {
+      console.error('WebSocket Error:', error);
+      if (error && typeof error === 'object' && 'target' in error && error.target instanceof WebSocket) {
+        console.error('WebSocket URL:', (error.target as WebSocket).url);
+      }
+    },
+    headers: {
+      'xi-api-key': apiKey
+    }
   });
 
-  const handleStartRecording = async () => {
-    if (!agentId) {
-      alert('ElevenLabs Agent ID is not configured.');
-      return;
-    }
+  const startCredits = useCallback(() => {
+    console.log('Starting credits tracking');
+    // You could implement a timer here to track usage
+  }, []);
+
+  const stopCredits = useCallback(() => {
+    console.log('Stopping credits tracking');
+    // Stop the tracking timer here if implemented
+  }, []);
+
+  // Load user credits on mount
+  useEffect(() => {
+    const loadCredits = async () => {
+      try {
+        setIsLoadingCredits(true);
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!session) {
+          setCredits(null);
+          return;
+        }
+        
+        const { data, error } = await supabase
+          .from('user_credits')
+          .select('*')
+          .eq('user_id', session.user.id)
+          .single();
+          
+        if (error && !error.message.includes('No rows found')) {
+          throw error;
+        }
+        
+        if (data) {
+          setCredits({
+            totalMinutesUsed: data.total_minutes_used || 0,
+            availableMinutes: 20 // Default 20 minutes for testing
+          });
+        } else {
+          // Create default user credits if none exist
+          const { error: insertError } = await supabase
+            .from('user_credits')
+            .insert({
+              user_id: session.user.id,
+              total_minutes_used: 0
+            });
+            
+          if (insertError) throw insertError;
+          
+          setCredits({
+            totalMinutesUsed: 0,
+            availableMinutes: 20 // Default 20 minutes for testing
+          });
+        }
+      } catch (error) {
+        console.error('Error loading credits:', error);
+      } finally {
+        setIsLoadingCredits(false);
+      }
+    };
+    
+    loadCredits();
+  }, [supabase]);
+
+  const saveRecording = async (conversationId: string) => {
     try {
-      await startSession({ agentId }); // Pass agentId here
+      console.log('Saving recording with ID:', conversationId);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data, error } = await supabase
+        .from('recordings')
+        .insert({
+          user_id: session.user.id,
+          title: `Conversation ${new Date().toLocaleString()}`,
+          conversation_id: conversationId,
+          duration: 0
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      console.log('Recording saved:', data);
     } catch (error) {
-      console.error('Error starting session:', error);
-      alert('Failed to start recording. Check console for details.');
+      console.error('Error saving recording:', error);
+    }
+  };
+
+  const updateRecordingDuration = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session || !conversationIdRef.current || !startTimeRef.current) return;
+
+      const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      const { error } = await supabase
+        .from('recordings')
+        .update({ duration })
+        .match({ 
+          user_id: session.user.id, 
+          conversation_id: conversationIdRef.current 
+        });
+
+      if (error) throw error;
+      console.log('Updated duration for conversation:', conversationIdRef.current);
+    } catch (error) {
+      console.error('Error updating recording duration:', error);
+    }
+  };
+
+  const handleStartRecording = async () => {
+    try {
+      if (!agentId) {
+        alert('ElevenLabs Agent ID is not configured.');
+        return;
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        alert('Please sign in to start recording');
+        return;
+      }
+      
+      if (credits && credits.totalMinutesUsed >= credits.availableMinutes) {
+        alert('You have no recording credits left. Please purchase additional credits to continue.');
+        return;
+      }
+
+      // Request microphone permission
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('Microphone permission granted');
+      
+      startCredits();
+      console.log('Credits tracking started');
+
+      // Start the conversation with your agent
+      console.log('Initializing session with agent...');
+      const id = await conversation.startSession({
+        agentId: agentId,
+      });
+      console.log('Session started successfully with ID:', id);
+      
+      conversationIdRef.current = id;
+      await saveRecording(id);
+
+    } catch (error) {
+      console.error('Failed to start conversation:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', error.message);
+        console.error('Error stack:', error.stack);
+      }
+      // Clean up if something goes wrong
+      stopCredits();
     }
   };
 
   const handleStopRecording = async () => {
     try {
-      await endSession();
+      await conversation.endSession();
+      await stopCredits();
+      console.log('Recording stopped');
     } catch (error) {
       console.error('Error stopping session:', error);
       alert('Failed to stop recording. Check console for details.');
@@ -45,15 +218,7 @@ export default function Page() {
     alert('This functionality is not yet implemented.');
   };
 
-  useEffect(() => {
-    // Example: Log status changes
-    console.log('Connection status:', status);
-    console.log('Is agent speaking:', isSpeaking);
 
-    // You might want to update recordings based on messages from the conversation
-    // This part depends on how you handle messages from the useConversation hook
-    // e.g., if there's an onMessage callback that provides audio data or URLs
-  }, [status, isSpeaking]);
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center justify-center p-4 text-black">
@@ -66,7 +231,7 @@ export default function Page() {
         <div className="flex justify-around mb-6">
           <button
             onClick={handleStartRecording}
-            disabled={status === 'connected' || isSpeaking}
+            disabled={conversation.status === 'connected'}
             className="px-6 py-3 bg-black text-white rounded-lg font-semibold hover:bg-gray-800 disabled:bg-gray-400 flex items-center space-x-2"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
@@ -76,7 +241,7 @@ export default function Page() {
           </button>
           <button
             onClick={handleStopRecording}
-            disabled={status !== 'connected' && !isSpeaking}
+            disabled={conversation.status !== 'connected'}
             className="px-6 py-3 bg-white text-gray-700 border border-gray-300 rounded-lg font-semibold hover:bg-gray-100 disabled:bg-gray-200 disabled:text-gray-400 flex items-center space-x-2"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
@@ -93,27 +258,20 @@ export default function Page() {
         </div>
 
         <div className="bg-white p-4 rounded-lg shadow mb-8 text-center">
-          <p className="text-gray-700">
-            <span className={`inline-block w-3 h-3 rounded-full mr-2 ${status === 'connected' ? 'bg-green-500' : status === 'connecting' ? 'bg-yellow-500' : 'bg-red-500'}`}></span>
-            Status: {status} {isSpeaking && "(Agent is speaking)"}
-          </p>
-        </div>
-
-        <div className="text-center">
-          <h2 className="text-2xl font-semibold mb-4">Your Recordings</h2>
-          {recordings.length === 0 ? (
-            <p className="text-gray-500">No recordings yet</p>
-          ) : (
-            <ul className="space-y-2">
-              {recordings.map((rec, index) => (
-                <li key={index} className="p-3 bg-gray-100 rounded-md text-left">
-                  {/* Display recording info - adjust as needed */}
-                  Recording {index + 1}
-                </li>
-              ))}
-            </ul>
+          <div className="flex items-center justify-center gap-2">
+            <p className="text-gray-700">
+              <span className={`inline-block w-3 h-3 rounded-full mr-2 ${conversation.status === 'connected' ? 'bg-green-500' : conversation.status === 'connecting' ? 'bg-yellow-500' : 'bg-red-500'}`}></span>
+              Status: {conversation.status} {conversation.isSpeaking && "(Agent is speaking)"}
+            </p>
+          </div>
+          {credits !== null && (
+            <div className="text-sm mt-2">
+              <p>Minutes remaining: <span className="font-medium">{(credits.availableMinutes - credits.totalMinutesUsed).toFixed(2)}</span></p>
+            </div>
           )}
         </div>
+
+        <RecordingsList />
       </div>
 
       <footer className="mt-12 text-center text-sm text-gray-500">
