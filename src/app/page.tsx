@@ -2,12 +2,19 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useConversation } from '@elevenlabs/react'; // Removed ConnectionStatus
-import { createClient } from '@/lib/supabase/client';
 import { RecordingsList } from './components/RecordingsList';
 
 interface UserCredits {
   totalMinutesUsed: number;
   availableMinutes: number;
+}
+
+interface Recording {
+  id: string;
+  title: string;
+  duration: number;
+  created_at: string;
+  conversation_id: string;
 }
 
 export default function Page() {
@@ -16,7 +23,6 @@ export default function Page() {
   const conversationIdRef = useRef<string | null>(null);
   const startTimeRef = useRef<number | null>(null);
   const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
-  const supabase = createClient();
 
   const apiKey = process.env.NEXT_PUBLIC_ELEVEN_LABS_API_KEY || '';
   console.log('API Key length:', apiKey.length); // Just log the length for security
@@ -57,98 +63,75 @@ export default function Page() {
     // Stop the tracking timer here if implemented
   }, []);
 
-  // Load user credits on mount
+  // Set default credits without user authentication
   useEffect(() => {
-    const loadCredits = async () => {
-      try {
-        setIsLoadingCredits(true);
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (!session) {
-          setCredits(null);
-          return;
-        }
-        
-        const { data, error } = await supabase
-          .from('user_credits')
-          .select('*')
-          .eq('user_id', session.user.id)
-          .single();
-          
-        if (error && !error.message.includes('No rows found')) {
-          throw error;
-        }
-        
-        if (data) {
-          setCredits({
-            totalMinutesUsed: data.total_minutes_used || 0,
-            availableMinutes: 20 // Default 20 minutes for testing
-          });
-        } else {
-          // Create default user credits if none exist
-          const { error: insertError } = await supabase
-            .from('user_credits')
-            .insert({
-              user_id: session.user.id,
-              total_minutes_used: 0
-            });
-            
-          if (insertError) throw insertError;
-          
-          setCredits({
-            totalMinutesUsed: 0,
-            availableMinutes: 20 // Default 20 minutes for testing
-          });
-        }
-      } catch (error) {
-        console.error('Error loading credits:', error);
-      } finally {
-        setIsLoadingCredits(false);
-      }
-    };
+    // Set default credits for all users
+    setCredits({
+      totalMinutesUsed: 0,
+      availableMinutes: 20 // Default 20 minutes for testing
+    });
+    setIsLoadingCredits(false);
+  }, []);
+  
+  // Helper functions for localStorage
+  const getRecordingsFromStorage = (): Recording[] => {
+    if (typeof window === 'undefined') return []; // Server-side check
     
-    loadCredits();
-  }, [supabase]);
+    const storedRecordings = localStorage.getItem('recordings');
+    return storedRecordings ? JSON.parse(storedRecordings) : [];
+  };
+  
+  const saveRecordingsToStorage = (recordings: Recording[]) => {
+    if (typeof window === 'undefined') return; // Server-side check
+    localStorage.setItem('recordings', JSON.stringify(recordings));
+  };
 
-  const saveRecording = async (conversationId: string) => {
+  const saveRecording = (conversationId: string) => {
     try {
       console.log('Saving recording with ID:', conversationId);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const { data, error } = await supabase
-        .from('recordings')
-        .insert({
-          user_id: session.user.id,
-          title: `Conversation ${new Date().toLocaleString()}`,
-          conversation_id: conversationId,
-          duration: 0
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      console.log('Recording saved:', data);
+      
+      // Create a new recording object
+      const newRecording: Recording = {
+        id: crypto.randomUUID(), // Generate a random UUID
+        title: `Conversation ${new Date().toLocaleString()}`,
+        conversation_id: conversationId,
+        duration: 0,
+        created_at: new Date().toISOString()
+      };
+      
+      // Get existing recordings and add the new one
+      const recordings = getRecordingsFromStorage();
+      recordings.push(newRecording);
+      
+      // Save back to localStorage
+      saveRecordingsToStorage(recordings);
+      
+      console.log('Recording saved:', newRecording);
     } catch (error) {
       console.error('Error saving recording:', error);
     }
   };
 
-  const updateRecordingDuration = async () => {
+  const updateRecordingDuration = () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session || !conversationIdRef.current || !startTimeRef.current) return;
+      if (!conversationIdRef.current || !startTimeRef.current) return;
 
       const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-      const { error } = await supabase
-        .from('recordings')
-        .update({ duration })
-        .match({ 
-          user_id: session.user.id, 
-          conversation_id: conversationIdRef.current 
-        });
-
-      if (error) throw error;
+      
+      // Get existing recordings
+      const recordings = getRecordingsFromStorage();
+      
+      // Find and update the recording with matching conversation_id
+      const updatedRecordings = recordings.map(recording => {
+        if (recording.conversation_id === conversationIdRef.current) {
+          return { ...recording, duration };
+        }
+        return recording;
+      });
+      
+      // Save back to localStorage
+      saveRecordingsToStorage(updatedRecordings);
+      
       console.log('Updated duration for conversation:', conversationIdRef.current);
     } catch (error) {
       console.error('Error updating recording duration:', error);
@@ -161,18 +144,10 @@ export default function Page() {
         alert('ElevenLabs Agent ID is not configured.');
         return;
       }
-
-      const { data: { session } } = await supabase.auth.getSession();
       
-      if (!session) {
-        alert('Please sign in to start recording');
-        return;
-      }
+      // No sign-in check required
       
-      if (credits && credits.totalMinutesUsed >= credits.availableMinutes) {
-        alert('You have no recording credits left. Please purchase additional credits to continue.');
-        return;
-      }
+      // Credits check removed - no user-based credits
 
       // Request microphone permission
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });

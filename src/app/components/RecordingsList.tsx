@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createBrowserClient } from '@/lib/supabase/client';
 
 interface Recording {
   id: string;
@@ -19,56 +18,47 @@ export function RecordingsList() {
   const [isPaused, setIsPaused] = useState(false);
   const [audioUrls, setAudioUrls] = useState<{ [key: string]: string }>({});
   const [error, setError] = useState<string | null>(null);
-  
-  const supabase = createBrowserClient();
 
   useEffect(() => {
     fetchRecordings();
   }, []);
 
-  const fetchRecordings = async () => {
+  const fetchRecordings = () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setRecordings([]);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('recordings')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setRecordings(data || []);
+      console.log('Fetching recordings from localStorage...');
+      
+      // Get recordings from localStorage
+      const storedRecordings = localStorage.getItem('recordings');
+      const parsedRecordings = storedRecordings ? JSON.parse(storedRecordings) : [];
+      
+      console.log('Loaded recordings:', parsedRecordings);
+      
+      // Sort by created_at in descending order
+      const sortedRecordings = parsedRecordings.sort((a: Recording, b: Recording) => {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+      
+      setRecordings(sortedRecordings);
       setError(null);
     } catch (error) {
       console.error('Error fetching recordings:', error);
-      setError('Failed to load recordings');
+      // More detailed error message
+      if (error instanceof Error) {
+        setError(`Failed to load recordings: ${error.message}`);
+      } else {
+        setError(`Failed to load recordings: Unknown error`);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Listen for auth changes to refresh recordings
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        fetchRecordings();
-      } else {
-        setRecordings([]);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
-
   const playAudio = async (recording: Recording) => {
     try {
+      // Toggle play/pause if already playing this recording
       if (currentAudio && playingId === recording.id) {
         if (isPaused) {
-          await currentAudio.play();
+          currentAudio.play();
           setIsPaused(false);
         } else {
           currentAudio.pause();
@@ -107,7 +97,16 @@ export function RecordingsList() {
 
         const audioBlob = await response.blob();
         audioUrl = URL.createObjectURL(audioBlob);
-        setAudioUrls((prev) => ({ ...prev, [recording.id]: audioUrl }));
+        setAudioUrls((prev) => {
+          const newUrls = { ...prev, [recording.id]: audioUrl };
+          // Cache to localStorage if possible
+          try {
+            localStorage.setItem('audioUrls', JSON.stringify(newUrls));
+          } catch (e) {
+            console.warn('Could not save audio URLs to localStorage', e);
+          }
+          return newUrls;
+        });
       }
 
       const audio = new Audio(audioUrl);
@@ -155,7 +154,16 @@ export function RecordingsList() {
 
         const audioBlob = await response.blob();
         audioUrl = URL.createObjectURL(audioBlob);
-        setAudioUrls((prev) => ({ ...prev, [recording.id]: audioUrl }));
+        setAudioUrls((prev) => {
+          const newUrls = { ...prev, [recording.id]: audioUrl };
+          // Cache to localStorage if possible
+          try {
+            localStorage.setItem('audioUrls', JSON.stringify(newUrls));
+          } catch (e) {
+            console.warn('Could not save audio URLs to localStorage', e);
+          }
+          return newUrls;
+        });
       }
 
       const a = document.createElement("a");
@@ -170,10 +178,15 @@ export function RecordingsList() {
     }
   };
 
-  const formatDuration = (duration: number) => {
-    const minutes = Math.floor(duration / 60);
-    const seconds = duration % 60;
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  // Helper function to save recordings to localStorage
+  const saveRecordingsToStorage = (recordings: Recording[]) => {
+    localStorage.setItem('recordings', JSON.stringify(recordings));
+  };
+
+  const formatDuration = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
   return (
