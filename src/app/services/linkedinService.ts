@@ -87,14 +87,14 @@ export async function generatePodcastBrief(profile: LinkedInProfile, profileUrl:
       
       Skills: ${profile.skills ? profile.skills.slice(0, 5).join(', ') : 'Not provided'}
       
-      Write a compelling 2-3 paragraph introduction for this guest on a podcast. The introduction should highlight their expertise, experience, and what makes them interesting. The tone should be professional but conversational, as if you're introducing them to a live audience. Don't use bullet points or lists - write in flowing paragraphs.
+      Write an engaging podcast introduction (300-350 characters) that builds excitement about this guest. Highlight their unique achievements, expertise, and what makes them fascinating. Use phrases like 'thrilled to have', 'incredibly accomplished', or 'pioneering work in'. End with an intriguing opening question. Format: Enthusiastic welcome + achievements + "[First Question]". Keep it dynamic and conversational.
     `;
 
     // Call OpenAI API
     const response = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4o',
+        model: 'gpt-4.1',
         messages: [
           {
             role: 'system',
@@ -123,23 +123,12 @@ export async function generatePodcastBrief(profile: LinkedInProfile, profileUrl:
 
 Your instructions:
 - Personalize everything: Start by identifying their most prominent roles, industries, transitions, or repeated themes across their career (e.g., "built multiple B2B SaaS startups", "moved from finance to AI", "ex-Google product manager turned VC").
-- Ask layered, opinionated questions, such as:
-  “You’ve worked at both startups and enterprises. What’s something that frustrates you about how large companies operate—but you feel isn’t talked about enough?”
-  “You list ‘AI Ethics’ as an interest. In your view, are we overhyping the risks or underestimating them?”
-- Surface contradictions:
-  If they worked in cybersecurity but also in open-source: “How do you reconcile the need for tight security with the ethos of transparency in open-source?”
-  If they moved from an MBA to founding a dev tools startup: “How did your business education clash with developer-first thinking, if at all?”
-- Challenge industry narratives:
-  “In your time at [Company], what was one belief in your industry you came to question—or outright reject?”
-  “You’ve been in fintech for 8 years—has the innovation been more superficial than structural?”
-- Invite storytelling and reflection:
-  “What’s a moment in your career you rarely talk about, but taught you something essential?”
-  “Which job on your LinkedIn was the most misunderstood by others?”
-- Maintain curiosity:
-  Always ask follow-ups that probe “why?”, “what did you learn?”, or “how did that shape your perspective?”
-- Avoid generic questions like “Tell me about your role at X.” Instead, combine context from their profile with broader themes like innovation, burnout, culture, risk, failure, or disruption.
+- Ask 4 engaging follow-up questions that build on the guest's background.
+- Questions should be thought-provoking and personal, not generic.
+- Focus on their unique experiences, industry insights, and career journey.
+- Keep questions concise but impactful.
 
-Given the following LinkedIn profile data, generate 5 such questions. Output ONLY a JSON array of strings.
+Given the following LinkedIn profile data, generate 4 follow-up questions (the opening question will be in the intro). Output ONLY a JSON array of strings.
 
 Profile Data:
 Name: ${profile.fullName || 'Unknown'}
@@ -152,7 +141,7 @@ Skills: ${profile.skills ? profile.skills.slice(0, 5).join(', ') : 'Not provided
     const questionsResponse = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4o',
+        model: 'gpt-4.1',
         messages: [
           {
             role: 'system',
