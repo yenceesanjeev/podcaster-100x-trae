@@ -194,10 +194,7 @@ export function RecordingsList() {
     }
   };
 
-  // Helper function to save recordings to localStorage
-  const saveRecordingsToStorage = (recordings: Recording[]) => {
-    localStorage.setItem('recordings', JSON.stringify(recordings));
-  };
+  // This function was removed as it was unused
 
   const formatDuration = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);

@@ -33,7 +33,6 @@ interface PodcastGuest {
 
 export default function Page() {
   const [credits, setCredits] = useState<UserCredits | null>(null);
-  const [isLoadingCredits, setIsLoadingCredits] = useState(true);
   const [isProcessingProfile, setIsProcessingProfile] = useState(false);
   const [currentStep, setCurrentStep] = useState<'input' | 'brief' | 'recording'>('input');
   const [podcastGuest, setPodcastGuest] = useState<PodcastGuest | null>(null);
@@ -88,7 +87,6 @@ export default function Page() {
       totalMinutesUsed: 0,
       availableMinutes: 20 // Default 20 minutes for testing
     });
-    setIsLoadingCredits(false);
   }, []);
   
   // Helper functions for localStorage
@@ -197,7 +195,7 @@ export default function Page() {
       }
       
       // Request microphone permission
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      await navigator.mediaDevices.getUserMedia({ audio: true });
       console.log('Microphone permission granted');
       
       startCredits();

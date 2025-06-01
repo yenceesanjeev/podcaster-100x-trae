@@ -63,6 +63,3 @@ export function LinkedInProfileInput({ onProfileSubmit, isLoading }: LinkedInPro
     </div>
   );
 }
-      </form>
-    </div>
-  );

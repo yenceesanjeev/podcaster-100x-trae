@@ -168,7 +168,7 @@ Skills: ${profile.skills ? profile.skills.slice(0, 5).join(', ') : 'Not provided
       // Try to parse JSON array from response
       questions = JSON.parse(questionsResponse.data.choices[0].message.content.trim());
       if (!Array.isArray(questions)) throw new Error('Not an array');
-    } catch (e) {
+    } catch {
       // Fallback: split by newlines or bullets
       questions = questionsResponse.data.choices[0].message.content.trim().split(/\n|\r|\d+\.\s|\-\s/).filter((q: string) => q.trim().length > 10);
     }
